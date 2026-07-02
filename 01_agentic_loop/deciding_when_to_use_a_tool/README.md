@@ -19,3 +19,6 @@ to wherever you run the script from.
 - `inspect_layer33_mlp.py` — per-neuron correlational ranking
 - `inspect_causal_patching.py` — direct ablation to test causation
 - `inspect_all_neurons_causal.py` — systematic causal ranking across all neurons
+
+`outputs/` contains the charts each script produces, including the
+ones referenced in the article.
