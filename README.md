@@ -9,7 +9,7 @@ Organized into 10 broad categories, each containing individual
 investigations as they're published:
 
 1. [Agentic loop](01_agentic_loop/) — reason, act, observe, repeat
-2. Tool use — structured tools and how a model chooses between them
+2. [Tool use](02_tool_use/) — structured tools and how a model chooses between them
 3. Constrained generation — forcing valid output at the token level
 4. Structured output — reliable schema-shaped output
 5. Retrieval-augmented generation — giving a model outside knowledge
@@ -21,6 +21,7 @@ investigations as they're published:
 
 Each investigation lives in its own subfolder with the code behind a
 published write-up. Requires `transformers`, `torch`, and
-`matplotlib`; each script expects a local model checkpoint and reads
-its path from the `MODEL_PATH` environment variable (see each
-investigation's own scripts for the specific model used).
+`matplotlib` (some investigations also need `requests` for live API
+calls — see each investigation's own README); each script expects a
+local model checkpoint and reads its path from the `MODEL_PATH`
+environment variable.
