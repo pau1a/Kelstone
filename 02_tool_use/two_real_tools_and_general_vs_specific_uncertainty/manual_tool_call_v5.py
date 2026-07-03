@@ -358,10 +358,16 @@ def plot_certainty_trajectory(
 # diagram at once and need to stay visually separable.
 COLOR_WEATHER = "#1baf7a"  # slot 2: aqua
 COLOR_TIME = "#eb6834"     # slot 8: orange
+COLOR_NOT_REACHED = "#c3c2b7"  # neutral grey — text-secondary-on-light, for the "didn't happen" band
 
 
 def plot_decision_sankey(
-    p_get: float, p_answer: float, p_weather_given_get: float, p_time_given_get: float, name: str
+    p_get: float,
+    p_answer: float,
+    p_weather_given_get: float,
+    p_time_given_get: float,
+    stage2_reached: bool,
+    name: str,
 ):
     """
     NEW INSTRUMENT: a hand-drawn Sankey/flow diagram of the FULL
@@ -379,6 +385,20 @@ def plot_decision_sankey(
     clean binary-tree branch), so this draws it by hand with filled
     polygons — each band a simple quadrilateral connecting a start
     height/width to an end height/width.
+
+    stage2_reached: a real, confirmed bug found by actually looking at
+    the rendered output — when stage 1 resolves to ANSWER, stage 2
+    never happens at all, but the caller was previously substituting a
+    fabricated 0.5/0.5 placeholder split so this function always had
+    SOME numbers to draw. That produced a chart showing a confident
+    "weather vs time, 50/50" split that never actually occurred, which
+    is exactly the kind of thing this project is supposed to catch, not
+    commit. When stage2_reached is False, the GET branch's stage-2
+    columns are drawn as a single flat, hatched, neutral-grey band
+    labelled "not reached" instead — no fabricated numbers, and the
+    chart keeps the same three-column shape as when stage 2 DID fire,
+    so the two charts stay visually comparable rather than one growing
+    or shrinking a column depending on what happened.
     """
     fig, ax = plt.subplots(figsize=(11, 6))
 
@@ -412,18 +432,48 @@ def plot_decision_sankey(
     # Stage 1 -> stage 2: only the GET band splits further, scaled to
     # occupy the same vertical span the GET band already has at
     # stage1_x — the ANSWER band terminates, drawn as a closed leaf.
-    weather_top = get_top
-    weather_bot = get_top - (get_top - get_bot) * p_weather_given_get
-    time_top = weather_bot
-    time_bot = get_bot
-    band(
-        stage1_x, stage2_x, get_top, get_bot, weather_top, weather_bot,
-        COLOR_WEATHER, f"_weather\nP={p_weather_given_get:.3f}|GET",
-    )
-    band(
-        stage1_x, stage2_x, get_top, get_bot, time_top, time_bot,
-        COLOR_TIME, f"_time\nP={p_time_given_get:.3f}|GET",
-    )
+    if stage2_reached:
+        weather_top = get_top
+        weather_bot = get_top - (get_top - get_bot) * p_weather_given_get
+        time_top = weather_bot
+        time_bot = get_bot
+        band(
+            stage1_x, stage2_x, get_top, get_bot, weather_top, weather_bot,
+            COLOR_WEATHER, f"_weather\nP={p_weather_given_get:.3f}|GET",
+        )
+        band(
+            stage1_x, stage2_x, get_top, get_bot, time_top, time_bot,
+            COLOR_TIME, f"_time\nP={p_time_given_get:.3f}|GET",
+        )
+    elif (get_top - get_bot) > 0.02:
+        # Stage 2 genuinely never happened on this run — no real
+        # weather/time split exists to draw. A single flat, hatched,
+        # neutral-grey band stands in for it: same column position and
+        # width as the real split would occupy, honestly labelled as
+        # not having occurred, rather than either fabricating numbers
+        # or silently dropping the column. Only drawn when the GET
+        # band has enough real height to hold it — a real bug found by
+        # actually looking at the rendered chart: when P(GET) is itself
+        # ~0.000 (this response never seriously considered a tool call
+        # at all), get_top - get_bot collapses to ~0, so the "not
+        # reached" fill and its label were being drawn into a
+        # zero-height sliver — invisible, with the label floating,
+        # unanchored, over whatever color happened to be underneath
+        # (the ANSWER leaf, which legitimately fills most of the chart
+        # when P(ANSWER) ~ 1.0). Below this threshold there's nothing
+        # meaningful to label at stage 2 either way, so it's skipped
+        # entirely rather than drawn illegibly.
+        xs = [stage1_x, stage2_x, stage2_x, stage1_x]
+        ys = [get_top, get_top, get_bot, get_bot]
+        ax.fill(
+            xs, ys, color=COLOR_NOT_REACHED, alpha=0.5, edgecolor="white",
+            linewidth=0.5, hatch="////",
+        )
+        ax.annotate(
+            "stage 2 not reached\n(this response ended at stage 1)",
+            xy=((stage1_x + stage2_x) / 2, (get_top + get_bot) / 2),
+            fontsize=9, ha="center", va="center", color="#3a3a38",
+        )
     # ANSWER terminates at stage1_x — drawn as a flat closed leaf
     # rather than continuing, since stage 2 never happens on this path.
     band(
@@ -903,13 +953,20 @@ def ask_model_manual(messages: list[dict], step: int) -> str:
 
     if stage1_probs is not None:
         get_p, answer_p = stage1_probs
-        # If stage 2 never happened (stage 1 resolved to ANSWER), there
-        # is no real _weather/_time split to show — represent that as
-        # an even, informationally-empty 0.5/0.5 split rather than
-        # fabricating a result, since the Sankey needs SOME numbers to
-        # draw the (unreached) stage-2 bands.
-        weather_p, time_p = stage2_probs if stage2_probs is not None else (0.5, 0.5)
-        sankey_path = plot_decision_sankey(get_p, answer_p, weather_p, time_p, f"v5_step{step}")
+        # Real, confirmed bug (found by looking at the actual rendered
+        # chart, not just the code): this used to substitute a
+        # fabricated 0.5/0.5 placeholder whenever stage 2 never
+        # happened, which drew a confident-looking "50/50 weather vs
+        # time" split on the chart that never actually occurred, with
+        # overlapping labels as a second, purely visual symptom of the
+        # same underlying problem. Fixed: pass through whether stage 2
+        # was genuinely reached, and let plot_decision_sankey render an
+        # honest "not reached" band instead of inventing numbers.
+        stage2_reached = stage2_probs is not None
+        weather_p, time_p = stage2_probs if stage2_reached else (0.0, 0.0)
+        sankey_path = plot_decision_sankey(
+            get_p, answer_p, weather_p, time_p, stage2_reached, f"v5_step{step}"
+        )
         print(f"  [chart] {sankey_path}")
 
     return tokenizer.decode(generated_ids, skip_special_tokens=True)
